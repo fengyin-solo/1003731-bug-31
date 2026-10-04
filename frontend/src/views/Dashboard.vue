@@ -37,13 +37,15 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 
-import { loadOverview } from '@/api/local-service'
+import { loadOverview, syncEnvChecks } from '@/api/local-service'
 import type { OverviewResult } from '@/data/types'
 
 const cards = ref<OverviewResult['cards']>([])
 const moduleRows = ref<OverviewResult['modules']>([])
 
 function refresh() {
+  // 概览也是校验链路的一个入口：先统一核查再统计，预警待办跟着更新
+  syncEnvChecks()
   const payload = loadOverview()
   cards.value = payload.cards
   moduleRows.value = payload.modules

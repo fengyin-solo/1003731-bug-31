@@ -24,6 +24,38 @@
       </span>
     </p>
 
+    <section class="env-panel">
+      <div class="panel-head">
+        <h3>站房环境核查（联动蒸发观测）</h3>
+        <span class="panel-desc">蒸发量、水温、风速缺任何一项即判异常，结论与蒸发列表、预警待办同源</span>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>站点编号</th>
+            <th>蒸发量(mm)</th>
+            <th>水温(℃)</th>
+            <th>风速(m/s)</th>
+            <th>核查结论</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in envRows" :key="item.id">
+            <td>{{ item.station }}</td>
+            <td>{{ item.evaporation }}</td>
+            <td>{{ item.waterTemp }}</td>
+            <td>{{ item.windSpeed }}</td>
+            <td :class="item.conclusion === '异常' ? 'review-abnormal' : 'review-normal'">
+              {{ item.conclusion }}（{{ item.source }}<template v-if="item.reasons.length">：{{ item.reasons.join('、') }}</template>）
+            </td>
+          </tr>
+          <tr v-if="!envRows.length">
+            <td colspan="5" class="empty-state">暂无站房环境数据</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <form class="filter-bar" @submit.prevent="reload">
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
@@ -78,8 +110,10 @@ import {
   listEntries,
   moduleMeta,
   runAction as applyAction,
+  stationEnvPanel,
+  syncEnvChecks,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import type { EntryRow, StationEnvPanelRow } from '@/data/types'
 
 const meta = moduleMeta('stationhouse')
 const columns = ["记录编号", "站点编号", "维护类型", "维护内容", "维护单位", "维护日期", "费用支出", "维护状态"]
@@ -88,6 +122,7 @@ const statuses = ["待安排", "已安排", "施工中", "已完成", "已验收
 const stats = [{"label": "待维护项数", "value": 0}, {"label": "施工中项数", "value": 0}, {"label": "本月已验收", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
+const envRows = ref<StationEnvPanelRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
@@ -128,10 +163,15 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    envRows.value = stationEnvPanel()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '站房维护列表读取失败'
   }
 }
 
-onMounted(reload)
+onMounted(() => {
+  // 另一个站房入口：进入面板即沿同一条环境校验链路写入核查
+  syncEnvChecks()
+  reload()
+})
 </script>

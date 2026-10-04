@@ -18,6 +18,46 @@
       </article>
     </div>
 
+    <section class="todo-panel">
+      <div class="panel-head">
+        <h3>预警待办</h3>
+        <button class="btn" type="button" @click="refreshTodos">刷新待办</button>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>业务模块</th>
+            <th>记录编号</th>
+            <th>站点编号</th>
+            <th>核查结论</th>
+            <th>结论来源</th>
+            <th>缺测/超标明细</th>
+            <th>状态</th>
+            <th>更新时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in todos" :key="item.recordKey">
+            <td>{{ moduleName(item.moduleKey) }}</td>
+            <td>{{ item.recordCode }}</td>
+            <td>{{ item.station || '—' }}</td>
+            <td :class="item.conclusion === '异常' ? 'review-abnormal' : 'review-normal'">
+              {{ item.conclusion }}
+            </td>
+            <td>{{ item.source }}</td>
+            <td>{{ item.reasons.join('、') || '—' }}</td>
+            <td :class="item.resolved ? 'todo-done' : 'todo-open'">
+              {{ item.resolved ? '已复核' : '待处理' }}
+            </td>
+            <td>{{ formatTime(item.reviewedAt) }}</td>
+          </tr>
+          <tr v-if="!todos.length">
+            <td colspan="8" class="empty-state">暂无预警待办，环境核查均未发现异常</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <p class="status-legend">
       <span v-for="item in statusSummary" :key="item.status" class="legend-item">
         {{ item.status }}：{{ item.count }}
@@ -76,10 +116,12 @@ import { computed, onMounted, ref } from 'vue'
 import {
   downloadEntries,
   listEntries,
+  listWarningTodos,
   moduleMeta,
   runAction as applyAction,
+  syncEnvChecks,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import type { EntryRow, ReviewItem } from '@/data/types'
 
 const meta = moduleMeta('warning')
 const columns = ["配置编号", "站点编号", "监测类型", "蓝色阈值", "黄色阈值", "橙色阈值", "红色阈值", "生效状态"]
@@ -88,6 +130,7 @@ const statuses = ["草稿", "已生效", "已调整", "已停用"]
 const stats = [{"label": "配置总数", "value": 0}, {"label": "已生效数", "value": 0}, {"label": "本月调整数", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
+const todos = ref<ReviewItem[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
@@ -98,6 +141,24 @@ const statusSummary = computed(() =>
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+
+function moduleName(key: string) {
+  try {
+    return moduleMeta(key).name
+  } catch {
+    return key
+  }
+}
+
+function formatTime(iso: string) {
+  const time = new Date(iso)
+  return Number.isNaN(time.getTime()) ? iso : time.toLocaleString('zh-CN', { hour12: false })
+}
+
+function refreshTodos() {
+  syncEnvChecks()
+  todos.value = listWarningTodos()
+}
 
 function resetFilters() {
   filters.value = {}
@@ -133,5 +194,8 @@ function reload() {
   }
 }
 
-onMounted(reload)
+onMounted(() => {
+  refreshTodos()
+  reload()
+})
 </script>

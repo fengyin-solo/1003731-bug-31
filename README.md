@@ -68,4 +68,10 @@ npm run build
 - 字段、状态、动作与流转目标集中在 `frontend/src/data/modules.ts`；示例数据在
   `frontend/src/data/seed.ts`。
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
+- 环境校验链路（蒸发量、水温、风速的阈值范围、缺值口径与判定规则）集中在
+  `frontend/src/data/env-check.ts`，蒸发列表、站房面板、运营概览、预警待办共用这一份。
+  缺测允许保存、入库后按异常挂预警待办；无法解析或超出阈值标准的一律不允许保存。
+- 核查结论与预警待办持久化在 localStorage `hydrology-monitor-station:reviews`，同一记录
+  只留一条有效结论（重复或并发提交以最后一次为准）；人工改判与历史审核结论会锁定，
+  自动校验不得覆盖，刷新或重开浏览器复核结论都还在。
 - 想回到初始数据：清掉浏览器里 `hydrology-monitor-station:entries` 这一项，或调用 `resetModule(模块)`。
