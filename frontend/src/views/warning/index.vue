@@ -3,7 +3,7 @@
     <header class="page-head">
       <div>
         <h2>预警阈值管理</h2>
-        <p class="page-desc">维护预警阈值配置，围绕配置编号、站点编号、监测类型、蓝色阈值做登记、筛选与状态流转。</p>
+        <p class="page-desc">蒸发环境预警待办由统一判定与复核结论实时派生：任何入口改判后此处立即同步，不再残留旧结论。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记预警阈值配置</button>
@@ -12,96 +12,167 @@
     </header>
 
     <div class="stat-row">
-      <article v-for="item in stats" :key="item.label" class="stat-card">
+      <article v-for="item in overviewCards" :key="item.label" class="stat-card">
         <span class="stat-label">{{ item.label }}</span>
-        <strong class="stat-value">{{ item.value }}</strong>
+        <strong class="stat-value" :class="item.danger ? 'error-text' : ''">{{ item.value }}</strong>
       </article>
     </div>
 
-    <p class="status-legend">
-      <span v-for="item in statusSummary" :key="item.status" class="legend-item">
-        {{ item.status }}：{{ item.count }}
-      </span>
-    </p>
+    <p class="rule-tip">统一环境校验标准：{{ thresholdSummary() }}</p>
 
-    <form class="filter-bar" @submit.prevent="reload">
-      <label v-for="field in filterFields" :key="field" class="filter-item">
-        <span>{{ field }}</span>
-        <input v-model="filters[field]" :placeholder="`按${field}检索`" />
-      </label>
-      <button class="btn" type="submit">查询</button>
-      <button class="btn ghost" type="button" @click="resetFilters">重置条件</button>
-    </form>
+    <div class="todo-tabs">
+      <button
+        class="btn"
+        :class="{ primary: tab === 'pending' }"
+        type="button"
+        @click="tab = 'pending'"
+      >
+        待复核预警（{{ pendingTodos.length }}）
+      </button>
+      <button
+        class="btn"
+        :class="{ primary: tab === 'handled' }"
+        type="button"
+        @click="tab = 'handled'"
+      >
+        已处理结论（{{ reviewed.length }}）
+      </button>
+    </div>
 
-    <table class="data-table">
+    <table v-if="tab === 'pending'" class="data-table">
       <thead>
         <tr>
-          <th v-for="column in columns" :key="column">{{ column }}</th>
-          <th>当前状态</th>
-          <th>可执行动作</th>
+          <th>记录编号</th>
+          <th>站点编号</th>
+          <th>观测日期</th>
+          <th>蒸发量/水温/气温/风速</th>
+          <th>自动判定</th>
+          <th>缺测与超范围原因</th>
+          <th>来源入口</th>
+          <th>操作</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows" :key="String(row.id)">
-          <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
-          <td>{{ row.status }}</td>
+        <tr v-for="item in pendingTodos" :key="String(item.row.id)">
+          <td>{{ item.row['记录编号'] }}</td>
+          <td>{{ item.row['站点编号'] }}</td>
+          <td>{{ item.row['观测日期'] }}</td>
+          <td>{{ metricText(item) }}</td>
+          <td class="error-text">{{ item.verdictLabel }}</td>
+          <td class="error-text">{{ item.reasons.join('；') }}</td>
+          <td>{{ item.sourceLabel }}</td>
           <td class="row-actions">
-            <button
-              v-for="action in actions"
-              :key="action"
+            <button class="link" type="button" @click="openReview(item)">复核改判</button>
+            <RouterLink
               class="link"
-              type="button"
-              @click="runAction(action, row)"
+              :to="{ path: '/evaporation', query: { evapId: String(item.row.id), evapAction: 'review' } }"
             >
-              {{ action }}
-            </button>
+              到蒸发列表处理
+            </RouterLink>
           </td>
         </tr>
-        <tr v-if="!rows.length">
-          <td :colspan="columns.length + 2" class="empty-state">暂无预警阈值数据，可先登记预警阈值配置</td>
+        <tr v-if="!pendingTodos.length">
+          <td colspan="8" class="empty-state">暂无待复核预警：各入口提交的结论已全部同步</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <table v-else class="data-table">
+      <thead>
+        <tr>
+          <th>记录编号</th>
+          <th>站点编号</th>
+          <th>观测日期</th>
+          <th>有效结论</th>
+          <th>复核来源</th>
+          <th>复核人</th>
+          <th>复核时间</th>
+          <th>复核说明</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="item in reviewed" :key="String(item.row.id)">
+          <td>{{ item.row['记录编号'] }}</td>
+          <td>{{ item.row['站点编号'] }}</td>
+          <td>{{ item.row['观测日期'] }}</td>
+          <td :class="item.abnormal ? 'error-text' : 'normal-text'">
+            {{ item.verdictLabel }}
+            <span v-if="item.conclusion?.source === 'legacy'" class="conclusion-tag">历史兼容</span>
+          </td>
+          <td>{{ item.conclusion ? REVIEW_SOURCE_LABELS[item.conclusion.source] : '—' }}</td>
+          <td>{{ item.conclusion?.reviewer ?? '—' }}</td>
+          <td>{{ item.conclusion?.reviewedAt || '历史迁移' }}</td>
+          <td>{{ item.conclusion?.note || '—' }}</td>
+          <td>
+            <button class="link" type="button" @click="openReview(item)">查看/再次改判</button>
+          </td>
+        </tr>
+        <tr v-if="!reviewed.length">
+          <td colspan="9" class="empty-state">暂无已处理结论</td>
         </tr>
       </tbody>
     </table>
 
     <footer class="page-foot">
-      <span>共 {{ total }} 条预警阈值记录</span>
-      <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
+      <span>待办数量随各入口复核操作实时变化，刷新页面结论仍保留</span>
+      <span v-if="flashMessage" class="success-text">{{ flashMessage }}</span>
     </footer>
+
+    <EvapReviewDialog
+      v-model:open="reviewOpen"
+      :record-id="reviewRecordId"
+      source="warning-todo"
+      @submitted="onReviewSubmitted"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
+import EvapReviewDialog from '@/components/evaporation/EvapReviewDialog.vue'
+import { downloadEntries, moduleMeta } from '@/api/local-service'
+import { thresholdSummary } from '@/data/evaporation/rules'
 import {
-  downloadEntries,
-  listEntries,
-  moduleMeta,
-  runAction as applyAction,
-} from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+  listEffective,
+  REVIEW_SOURCE_LABELS,
+  type EffectiveState,
+} from '@/data/evaporation/review'
 
 const meta = moduleMeta('warning')
-const columns = ["配置编号", "站点编号", "监测类型", "蓝色阈值", "黄色阈值", "橙色阈值", "红色阈值", "生效状态"]
-const actions = ["发布生效", "调整阈值", "停用配置"]
-const statuses = ["草稿", "已生效", "已调整", "已停用"]
-const stats = [{"label": "配置总数", "value": 0}, {"label": "已生效数", "value": 0}, {"label": "本月调整数", "value": 0}]
 
-const rows = ref<EntryRow[]>([])
-const total = ref(0)
-const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
-const filterFields = columns.slice(0, 3)
-const statusSummary = computed(() =>
-  statuses.map((status: string) => ({
-    status,
-    count: rows.value.filter((row) => String(row.status) === status).length,
-  })),
+const tab = ref<'pending' | 'handled'>('pending')
+const states = ref<EffectiveState[]>([])
+const reviewOpen = ref(false)
+const reviewRecordId = ref<number | null>(null)
+const flashMessage = ref('')
+
+const pendingTodos = computed(() => states.value.filter((item) => item.pending))
+const reviewed = computed(() =>
+  states.value
+    .filter((item) => item.conclusion !== null)
+    .sort((a, b) =>
+      String(b.conclusion?.reviewedAt ?? '').localeCompare(String(a.conclusion?.reviewedAt ?? '')),
+    ),
 )
 
-function resetFilters() {
-  filters.value = {}
-  reload()
+const overviewCards = computed(() => [
+  { label: '阈值配置总数', value: 3, danger: false },
+  { label: '待复核蒸发预警', value: pendingTodos.value.length, danger: pendingTodos.value.length > 0 },
+  { label: '异常记录数', value: states.value.filter((item) => item.abnormal).length, danger: true },
+  { label: '已保留结论', value: reviewed.value.length, danger: false },
+])
+
+function metricText(item: EffectiveState): string {
+  const value = (key: string) => {
+    const raw = item.row[key]
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+      return key === '气温' ? '未填' : '缺测'
+    }
+    return String(raw)
+  }
+  return `${value('蒸发量')} / ${value('水温')} / ${value('气温')} / ${value('风速')}`
 }
 
 function exportRows() {
@@ -109,28 +180,22 @@ function exportRows() {
 }
 
 function openCreate() {
-  errorMessage.value = '预警阈值配置登记入口尚未接入审批流'
+  flashMessage.value = ''
 }
 
-function runAction(action: string, row: EntryRow) {
-  errorMessage.value = ''
-  const result = applyAction(meta.key, Number(row.id), action)
-  if (!result.ok) {
-    errorMessage.value = result.message
-    return
-  }
+function openReview(item: EffectiveState) {
+  flashMessage.value = ''
+  reviewRecordId.value = Number(item.row.id)
+  reviewOpen.value = true
+}
+
+function onReviewSubmitted() {
   reload()
+  flashMessage.value = '改判已生效：待办与蒸发列表、站房面板同步更新，历史结论已归档保留'
 }
 
 function reload() {
-  errorMessage.value = ''
-  try {
-    const payload = listEntries(meta.key, filters.value)
-    rows.value = payload.items
-    total.value = payload.total
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '预警阈值列表读取失败'
-  }
+  states.value = listEffective()
 }
 
 onMounted(reload)
